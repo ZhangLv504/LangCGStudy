@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+
+# IDE
+.idea/
+
+# 本地 AI 工作数据与模型文件
+.workbuddy/
+models/
