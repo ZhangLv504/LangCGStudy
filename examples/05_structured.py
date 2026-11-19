@@ -70,6 +70,29 @@ def run_structured(structured_model, text: str) -> tuple[str, str]:
     except Exception as e:
         return "失败", f"{type(e).__name__}: {e}"
 
+class _AlwaysInvalid:
+    """假的 structured_model：invoke 时用真实 pydantic 校验一个超范围值。
+
+    为什么不靠真模型触发：Ollama 走约束解码，schema 的 minimum/maximum 会直接限制生成，
+    模型总能吐出一个合法值（实测 le=10 时它把 24.5 硬填成 2），ValidationError 因此几乎不可达。
+    要验证错误分支，就得自己注入失败，而不是等外部系统恰好出错。
+    """
+
+    def invoke(self, _messages):
+        return WeatherReport.model_validate(
+            {"city": "上海", "condition": "雨", "temperature_c": 245}
+        )
+
+
+def selftest_guard() -> None:
+    """确定性验证 run_structured 的校验拦截分支。"""
+    print("\n[自测] 故障注入：直接喂一个越界值，确认拦截分支与错误提取正常")
+    status, detail = run_structured(_AlwaysInvalid(), "（不经过模型）")
+    print(f"  结果：{status}\n    -> {detail}")
+    print("  => PASS，拦截分支工作正常" if status.startswith("校验拦截")
+          else "  => FAIL，拦截分支未被触发")
+
+
 def main():
     model = build_model()
     structured_model = model.with_structured_output(WeatherReport)
@@ -110,6 +133,9 @@ def main():
         f"其他失败 {stats_b['失败']} 条"
     )
     print("=" * 70)
+
+    selftest_guard()
+
 
 if __name__ == "__main__":
     main()
