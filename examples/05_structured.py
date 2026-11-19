@@ -18,7 +18,7 @@ def build_model() -> ChatOllama:
 class WeatherReport(BaseModel):
     city: str = Field(description="城市名")
     condition: Literal["晴", "多云", "阴", "雨", "雪"] = Field(description="天气状况")
-    temperature_c: int = Field(description="摄氏温度，整数")
+    temperature_c: int = Field(ge=-60, le=60, description="摄氏温度，整数")
 
 TEST_INPUTS = [
     # Case 1: 干净输入 -> A 组有机会「侥幸成功」
@@ -34,7 +34,7 @@ TEST_INPUTS = [
 ]
 
 def run_naive(model: ChatOllama, text: str) -> tuple[str, str]:
-    """A 组：天真做法（纯提示词约束 + json.loads）"""
+    """A 组：天真做法（只交代字段 + 提示词要求只输出 JSON）"""
     prompt = (
         "从下面这段话中提取今天的天气信息，包含 city、condition、temperature_c 三个字段。\n"
         "只输出 JSON，不要任何解释。\n\n"
@@ -44,27 +44,29 @@ def run_naive(model: ChatOllama, text: str) -> tuple[str, str]:
     raw = response.content
 
     try:
-        # 把一个 JSON 格式的字符串，转换成对应的 Python 对象。
         data = json.loads(raw)
     except json.JSONDecodeError as e:
-        snippet = raw.replace("\n", "\\n")[:100]
+        snippet = raw.replace("\n", "\\n")[:120]
         return "崩了(JSONDecodeError)", f"{e.msg} | 原始输出: {snippet}"
 
     try:
-        # 用一个 Pydantic 模型，去校验一份数据，校验通过后返回一个模型实例。
         report = WeatherReport.model_validate(data)
         return "侥幸成功", repr(report)
     except ValidationError as e:
         errs = [f"{'.'.join(map(str, err['loc']))}: {err['msg']}" for err in e.errors()]
-        return "崩了(字段/类型不对)", f"{'; '.join(errs)} | 实际 JSON: {data}"
+        return "崩了(字段/类型/业务约束不对)", f"{'; '.join(errs)} | 实际 JSON: {data}"
 
 def run_structured(structured_model, text: str) -> tuple[str, str]:
     """B 组：结构化做法（with_structured_output）"""
     try:
         report: WeatherReport = structured_model.invoke(
-            f"从下面的句子中提取天气信息：\n{text}"
+            f"提取下面这段话中今天的天气信息：\n{text}"
         )
         return "成功", repr(report)
+    except ValidationError as e:
+        # 显式捕获业务/Schema 校验失败（例如模型把 24.5 吐成 245 被 ge/le 拦下）
+        errs = [f"{'.'.join(map(str, err['loc']))}: {err['msg']}" for err in e.errors()]
+        return "校验拦截(ValidationError)", "; ".join(errs)
     except Exception as e:
         return "失败", f"{type(e).__name__}: {e}"
 
@@ -74,12 +76,16 @@ def main():
 
     stats_a = {
         "崩了(JSONDecodeError)": 0,
-        "崩了(字段/类型不对)": 0,
+        "崩了(字段/类型/业务约束不对)": 0,
         "侥幸成功": 0,
     }
-    stats_b = {"成功": 0, "失败": 0}
+    stats_b = {
+        "成功": 0,
+        "校验拦截(ValidationError)": 0,
+        "失败": 0,
+    }
 
-    for i,text in enumerate(TEST_INPUTS, start=1):
+    for i, text in enumerate(TEST_INPUTS, start=1):
         print(f"\n[Case {i}] 输入：{text}")
         print("-" * 70)
 
@@ -91,15 +97,19 @@ def main():
         stats_b[status_b] += 1
         print(f"  B 组（结构化做法）: {status_b}\n    -> {detail_b}")
 
-        print("\n" + "=" * 70)
-        print("汇总结果（共 5 条）：")
-        print(
-            f"  A 组：JSONDecodeError {stats_a['崩了(JSONDecodeError)']} 条 | "
-            f"字段/类型不对 {stats_a['崩了(字段/类型不对)']} 条 | "
-            f"侥幸成功 {stats_a['侥幸成功']} 条"
-        )
-        print(f"  B 组：成功 {stats_b['成功']} 条 | 失败 {stats_b['失败']} 条")
-        print("=" * 70)
+    print("\n" + "=" * 70)
+    print(f"汇总结果（共 {len(TEST_INPUTS)} 条）：")
+    print(
+        f"  A 组：JSONDecodeError {stats_a['崩了(JSONDecodeError)']} 条 | "
+        f"字段/类型/业务约束不对 {stats_a['崩了(字段/类型/业务约束不对)']} 条 | "
+        f"侥幸成功 {stats_a['侥幸成功']} 条"
+    )
+    print(
+        f"  B 组：成功 {stats_b['成功']} 条 | "
+        f"校验拦截 {stats_b['校验拦截(ValidationError)']} 条 | "
+        f"其他失败 {stats_b['失败']} 条"
+    )
+    print("=" * 70)
 
 if __name__ == "__main__":
     main()
