@@ -32,15 +32,6 @@ def get_time(city: str) -> str:
     """查询指定城市的实时时间。"""
     return f"{city}：下午5点整"
 
-def WeatherReport(BaseModel):
-    city: str = Field(description="城市名")
-    condition: Literal["晴", "多云", "阴", "雨", "雪"] = Field(description="天气状况")
-    temperature_c: int = Field(description="摄氏温度，整数")
-
-def TimeReport(BaseModel):
-    city: str = Field(description="城市名")
-    time_c: str = Field(description="城市时间，yyyy-MM-dd hh:mm:ss")
-
 def trim_history(msgs: list, max_len: int = 20) -> list:
     if len(msgs) <= max_len:
         return msgs
@@ -57,9 +48,17 @@ def trim_history(msgs: list, max_len: int = 20) -> list:
 
     return trimmed
 
+class WeatherReport(BaseModel):
+    city: str = Field(description="城市名")
+    condition: Literal["晴", "多云", "阴", "雨", "雪"] = Field(description="天气状况")
+    temperature_c: int = Field(description="摄氏温度，整数")
+
+class TimeReport(BaseModel):
+    city: str = Field(description="城市名")
+    time: str = Field(description="城市时间，yyyy-MM-dd hh:mm:ss")
+
 def main() -> None:
     model = build_mode()
-    model.with_structured_output([])
     bound = model.bind_tools([get_weather, get_time])
     msgs = []
 
