@@ -4,6 +4,7 @@ import time
 os.environ["NO_PROXY"] = "localhost,127.0.0.1"
 
 from langchain_ollama import ChatOllama
+from langchain_core.messages import HumanMessage, ToolMessage
 from pydantic import BaseModel, Field, ValidationError
 from typing import Literal
 
@@ -91,6 +92,49 @@ def exp2_to_4_tool_stream(model: ChatOllama, prompt: str) -> None:
     except json.JSONDecodeError as e:
         print(f"如期报错 -> {type(e).__name__}: {e}")
 
+
+def exp5_full_loop(model: ChatOllama, prompt: str) -> None:
+    print("\n" + "=" * 50)
+    print(f"实验 5：流式工具调用完整闭环 | 提问: {prompt!r}")
+    print("=" * 50)
+
+    tool_map = {"get_weather": get_weather}
+    bound = model.bind_tools([get_weather])
+    msgs = [HumanMessage(content=prompt)]
+
+    full = None
+    for chunk in bound.stream(msgs):
+        full = chunk if full is None else full + chunk
+
+    if not full or not full.tool_calls:
+        print(f"[未触发工具] 直接回答: {full.content if full else ''}")
+        return
+
+    # 流结束，将累加后的 AIMessageChunk 直接作为 AIMessage 存入历史
+    msgs.append(full)
+
+    for tc in full.tool_calls:
+        name = tc["name"]
+        args = tc["args"]
+        call_id = tc["id"]
+        print(f"[执行工具] {name}({args})")
+
+        if name in tool_map:
+            try:
+                res = tool_map[name](**args)
+            except Exception as e:
+                res = f"Error executing {name}: {type(e).__name__}: {e}"
+        else:
+            res = f"Error: Tool '{name}' not found."
+
+        msgs.append(ToolMessage(content=str(res), tool_call_id=call_id))
+
+    print("[最终回答] ", end="", flush=True)
+    for chunk in bound.stream(msgs):
+        if chunk.content:
+            print(chunk.content, end="", flush=True)
+    print()
+
 def main() -> None:
     model = ChatOllama(
         model="qwen3.5:4b",
@@ -104,6 +148,10 @@ def main() -> None:
     exp1_latency(model, prompt)
     exp2_to_4_tool_stream(model, prompt)
 
+    # 正常触发工具的闭环
+    exp5_full_loop(model, prompt)
+    # 边界验证：不触发工具的普通闲聊
+    exp5_full_loop(model, "1 + 1 等于几？")
 
 if __name__ == "__main__":
     main()
