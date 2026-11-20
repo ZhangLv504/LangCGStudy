@@ -9,9 +9,13 @@ from typing import Literal
 
 def get_weather(city: str) -> str:
     """查询指定城市的实时天气情况。"""
-    city: str = Field(description="城市名")
-    condition: Literal["晴", "多云", "阴", "雨", "雪"] = Field(description="天气状况")
-    temp_c: int = Field(lt=-60, gt=60, description="摄氏温度，整数")
+    temps = {
+        "北京": "18°C",
+        "上海": "24°C",
+        "西安": "15°C",
+    }
+    temp = temps.get(city, "20°C")
+    return f"{city}：晴，{temp}，西北风 2 级"
 
 def exp1_latency(model: ChatOllama, prompt: str) -> None:
     print("=" * 50)
